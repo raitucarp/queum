@@ -161,14 +161,17 @@ func (job *Job) Run() {
 		for {
 			select {
 			case <-job.ticker.C:
-				q := job.getFirstQueue()
-				ctx := Context{
-					Job:   job,
-					Queue: q,
-				}
+				queueCount := job.QueueCount()
+				if job.status == RUNNING && queueCount > 0 {
+					q := job.getFirstQueue()
+					ctx := Context{
+						Job:   job,
+						Queue: q,
+					}
 
-				// do stuff
-				job.handler(&ctx)
+					// do stuff
+					job.handler(&ctx)
+				}
 			}
 		}
 	}()
@@ -195,9 +198,15 @@ func (job *Job) GetStatus() STATUS {
 }
 
 // QueueCount get queue count in the current job.
-func (job *Job) QueueCount() (int64, error) {
-	count, err := client.LLen("baba").Result()
-	return count, err
+func (job *Job) QueueCount() int64 {
+	uniqueJobKey := job.getUniqueKey()
+	fullJobKey := buildKey(globalKey, "job", uniqueJobKey)
+
+	count, err := client.LLen(fullJobKey).Result()
+	if err != nil {
+		panic(err)
+	}
+	return count
 }
 
 // getKey get the current job unique key in db
