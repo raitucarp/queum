@@ -2,8 +2,6 @@ package queum
 
 import (
 	"encoding/json"
-	"fmt"
-	"strconv"
 	"time"
 
 	"gopkg.in/redis.v5"
@@ -19,26 +17,12 @@ const (
 	// RUNNING is a state when job is running
 	RUNNING
 
-	// RESUME is a state when a job got resumed
-	RESUME
+	// PENDING is a state when job is done
+	PENDING
 
 	// PAUSE is a state when a job is paused
 	PAUSE
 )
-
-// Context is a single job context
-type Context struct {
-	Job   *Job
-	Data  interface{}
-	Queue *Queue
-}
-
-// Queue is a single queue unit
-type Queue struct {
-	Progress  int
-	Data      interface{}
-	parentJob *Job
-}
 
 // Job is the main structure of job
 type Job struct {
@@ -114,67 +98,50 @@ func (job *Job) insertJob() {
 	if err != nil {
 		panic(err)
 	}
+
+	job.status = RUNNING
 }
 
 // getFirstQueue is get job queue from the current job
 func (job *Job) getFirstQueue() *Queue {
-	// get unique key of job
-	uniqueJobKey := job.getUniqueKey()
-
-	// get full job key
-	fullJobKey := buildKey(globalKey, "job", uniqueJobKey)
-
-	fmt.Println(fullJobKey)
-
-	// the queue key
-	firstQueueKey, err := client.LIndex(fullJobKey, 0).Result()
-	if err != nil {
-		panic(err)
+	queue := &Queue{
+		parentJob: job,
 	}
 
-	// build queue key
-	queueKey := buildKey(fullJobKey, "q", firstQueueKey)
+	// fetch queue data
+	queue.fetchData()
 
-	// get queue data
-	data, err := client.HGetAll(queueKey).Result()
-	if err != nil {
-		panic(err)
-	}
+	return queue
+}
 
-	progress, err := strconv.Atoi(data["progress"])
-	if err != nil {
-		panic(err)
-	}
+func (job *Job) listenTicker() {
+	for {
+		select {
+		case <-job.ticker.C:
+			queueCount := job.QueueCount("in-progress")
+			if job.status == RUNNING && queueCount > 0 {
+				q := job.getFirstQueue()
 
-	return &Queue{
-		Progress: progress,
-		Data:     data["data"],
+				// set job to pending, wait for done
+				job.status = PENDING
+
+				// create context for job handler
+				ctx := Context{
+					Job:   job,
+					Queue: q,
+				}
+
+				// do stuff
+				job.handler(&ctx)
+			}
+		}
 	}
 }
 
 // Run the job
 func (job *Job) Run() {
-	job.status = RUNNING
 	job.insertJob()
-
-	go func() {
-		for {
-			select {
-			case <-job.ticker.C:
-				queueCount := job.QueueCount()
-				if job.status == RUNNING && queueCount > 0 {
-					q := job.getFirstQueue()
-					ctx := Context{
-						Job:   job,
-						Queue: q,
-					}
-
-					// do stuff
-					job.handler(&ctx)
-				}
-			}
-		}
-	}()
+	go job.listenTicker()
 }
 
 // Pause the job
@@ -184,12 +151,13 @@ func (job *Job) Pause() {
 
 // Resume the job
 func (job *Job) Resume() {
-	job.status = RESUME
+	job.status = RUNNING
 }
 
 // Stop the job
 func (job *Job) Stop() {
 	job.status = STOP
+	job.ticker.Stop()
 }
 
 // GetStatus get the current status of the job
@@ -198,9 +166,9 @@ func (job *Job) GetStatus() STATUS {
 }
 
 // QueueCount get queue count in the current job.
-func (job *Job) QueueCount() int64 {
+func (job *Job) QueueCount(typ string) int64 {
 	uniqueJobKey := job.getUniqueKey()
-	fullJobKey := buildKey(globalKey, "job", uniqueJobKey)
+	fullJobKey := buildKey(globalKey, "job", uniqueJobKey, typ)
 
 	count, err := client.LLen(fullJobKey).Result()
 	if err != nil {
@@ -232,7 +200,8 @@ func (job *Job) insertQueue(data interface{}) {
 	}
 
 	fullJobKey := buildKey(globalKey, "job", uniqueJobKey)
-	err := client.RPush(fullJobKey, queueKey).Err()
+	inProgressKey := buildKey(fullJobKey, "in-progress")
+	err := client.LPush(inProgressKey, queueKey).Err()
 	if err != nil {
 		panic(err)
 	}
@@ -252,9 +221,8 @@ func (job *Job) insertQueue(data interface{}) {
 func (job *Job) Queue(data interface{}) {
 	go func() {
 		for {
-			if job.status == RUNNING {
+			if job.status == RUNNING || job.status == PAUSE {
 				job.insertQueue(data)
-
 				return
 			}
 		}
