@@ -1,6 +1,6 @@
 # Queum
 
-Queum is powerful job scheduler queue for golang. OK, that's little bit a proclaim. But what exactly is this?
+Queum is simple yet powerful job scheduler queue for golang.
 
 Like another job queue scheduler, queum support the following features:
 
@@ -8,3 +8,4 @@ Like another job queue scheduler, queum support the following features:
 - Add queue to a specific job
 - Process a job
 - Dynamically change the interval of a job
+- Capable to crate multiple job type with multiple queue job
