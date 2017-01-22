@@ -4,6 +4,7 @@ import (
 	"hash/fnv"
 	"math/rand"
 	"strings"
+	"time"
 )
 
 func hash(s string) uint32 {
@@ -12,7 +13,7 @@ func hash(s string) uint32 {
 	return h.Sum32()
 }
 
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 func hashFromString(s string, n int) string {
 	h := hash(s)
@@ -26,6 +27,7 @@ func hashFromString(s string, n int) string {
 }
 
 func randStringRunes(n int) string {
+	rand.Seed(time.Now().UnixNano())
 	b := make([]rune, n)
 	for i := range b {
 		b[i] = letterRunes[rand.Intn(len(letterRunes))]
